@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+sqlalchemy
+pandas
+openpyxl
+python-multipart
+google-generativeai
+matplotlib
+seaborn
