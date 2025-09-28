@@ -1,13 +1,14 @@
 import os
 import sqlite3
 import pandas as pd
-import matplotlib.pyplot as plt
 import google.generativeai as genai
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import tempfile
 from dotenv import load_dotenv
+import matplotlib.pyplot as plt
 import uuid
 
 # Configure Gemini
@@ -20,16 +21,16 @@ app = FastAPI()
 # Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://docubot-ai-xi.vercel.app" "http://localhost:5173"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Temp DB path
 DB_PATH = "uploaded_data.db"
 CHARTS_DIR = "charts"
 os.makedirs(CHARTS_DIR, exist_ok=True)
+app.mount("/charts", StaticFiles(directory="charts"), name="charts")
 
 class AskRequest(BaseModel):
     question: str
@@ -61,54 +62,66 @@ async def upload(file: UploadFile = File(...)):
 @app.post("/ask")
 async def ask_question(req: AskRequest):
     try:
-        # Step 1: Ask Gemini for SQL query
-        prompt = f"""
-        You are a SQL expert. Generate ONLY a valid SQLite query (no markdown, no explanation, no extra text).
+        # Step 1: Generate SQL query (force full dataset, not just LIMIT 1)
+        sql_prompt = f"""
+        You are a SQL expert.
+        Generate ONLY a valid SQLite query (no explanation, no markdown).
         Table name: uploaded_data.
+
+        Rules:
+        - Always return ALL groups, not just the top row. 
+          For example: if asked "Which department has the highest salary?", 
+          return a GROUP BY query with SUM/AVG/etc for all departments, 
+          ORDER BY the metric, but DO NOT use LIMIT.
+        - The query must return at least 2 columns: 
+          (1) a categorical column (like Department), 
+          (2) a numeric aggregate (like SUM(Salary) or AVG(Salary)).
+
         Question: {req.question}
         """
-        response = model.generate_content(prompt)
+        response = model.generate_content(sql_prompt)
         sql_query = response.text.strip().replace("```", "").replace("sqlite", "").replace("sql", "").strip()
 
-        # Step 2: Run SQL query
+        # Step 2: Run query
         conn = sqlite3.connect(DB_PATH)
         df = pd.read_sql_query(sql_query, conn)
         conn.close()
 
-        # Step 3: Ask Gemini to explain result in text
-        explanation_prompt = f"""
-        You are a data assistant. Based on this table result:
+        if df.empty:
+            return {"answer": "No data found for your query.", "sql_query": sql_query, "columns": [], "rows": [], "chart": None}
 
-        {df.head(20).to_string(index=False)}
-
-        Provide a short, clear natural language answer to the question:
-        "{req.question}"
+        # Step 3: Generate text answer (summarize top row, but with context of all rows)
+        top_row = df.iloc[0]
+        answer_prompt = f"""
+        The SQL result has columns {list(df.columns)} and rows {df.values.tolist()}.
+        Question: {req.question}
+        Please answer clearly in plain English:
+        - State which {df.columns[0]} ranks highest (from the first row).
+        - Mention its numeric value.
+        - Briefly note that the chart compares all groups.
         """
-        explanation = model.generate_content(explanation_prompt).text.strip()
+        text_answer = model.generate_content(answer_prompt).text.strip()
 
-        # Step 4: Save a chart
-        chart_filename = f"{CHARTS_DIR}/chart_{uuid.uuid4().hex}.png"
-        plt.figure(figsize=(8, 5))
-
-        if df.shape[1] >= 2:  # At least two columns to plot
-            x_col, y_col = df.columns[0], df.columns[1]
-            plt.bar(df[x_col].astype(str), df[y_col])
-            plt.xlabel(x_col)
-            plt.ylabel(y_col)
-            plt.title(req.question)
-            plt.xticks(rotation=30)
+        # Step 4: Save chart (always use full dataset)
+        chart_path = None
+        if df.shape[1] >= 2 and pd.api.types.is_numeric_dtype(df.iloc[:, 1]):
+            plt.figure(figsize=(7, 5))
+            df.plot(kind="bar", x=df.columns[0], y=df.columns[1], legend=False, color="skyblue", edgecolor="black")
+            plt.title(f"{req.question}")
+            plt.ylabel(df.columns[1])
+            plt.xticks(rotation=45, ha="right")
+            chart_filename = f"{uuid.uuid4().hex}.png"
+            chart_path = os.path.join(CHARTS_DIR, chart_filename)
             plt.tight_layout()
-            plt.savefig(chart_filename)
+            plt.savefig(chart_path)
             plt.close()
-        else:
-            chart_filename = None
 
         return {
+            "answer": text_answer,
             "sql_query": sql_query,
-            "columns": df.columns.tolist(),
+            "columns": list(df.columns),
             "rows": df.values.tolist(),
-            "answer": explanation,
-            "chart": chart_filename if chart_filename else None
+            "chart": chart_path
         }
 
     except Exception as e:
