@@ -1,6 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Upload, FileText, Bot, User, Loader2, Sparkles, MessageSquare, X } from 'lucide-react';
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL;
+
+await fetch(`${API_BASE}/upload`, { ... })
+await fetch(`${API_BASE}/ask`, { ... })
+
 const ChatbotFrontend = () => {
   // Add CSS for hiding scrollbar
   useEffect(() => {
