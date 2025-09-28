@@ -20,7 +20,7 @@ app = FastAPI()
 # Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://ai-data-agent-backend-48j5.onrender.com" "http://localhost:5173"],
+    allow_origins=["https://docubot-ai-xi.vercel.app" "http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
