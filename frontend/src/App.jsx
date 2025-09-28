@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Upload, FileText, Bot, User, Loader2, Sparkles, MessageSquare, X } from 'lucide-react';
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
 const ChatbotFrontend = () => {
   // Add CSS for hiding scrollbar
@@ -66,7 +67,7 @@ const ChatbotFrontend = () => {
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await fetch('http://localhost:8000/upload', {
+      const response = await fetch(`${API_BASE}/upload`, {
         method: 'POST',
         body: formData,
       });
@@ -109,7 +110,7 @@ const ChatbotFrontend = () => {
     setIsTyping(true);
 
     try {
-      const response = await fetch('http://localhost:8000/ask', {
+      const response = await fetch(`${API_BASE}/ask`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
